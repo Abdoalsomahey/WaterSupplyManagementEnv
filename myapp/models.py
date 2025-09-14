@@ -2,6 +2,7 @@ from django.db import models
 from django.conf import settings
 from django.utils import timezone
 from django.contrib.auth.models import AbstractUser
+from datetime import timedelta
 
 
 class User(AbstractUser):
@@ -46,6 +47,7 @@ class Order(models.Model):
         ("pending", "Pending"),
         ("confirmed", "Confirmed"),
         ("completed", "Completed"),
+        ("canceled", "Canceled"),
     ]
 
     customer = models.ForeignKey(Customer, on_delete=models.CASCADE, related_name="orders")
@@ -70,3 +72,42 @@ class Order(models.Model):
     def __str__(self):
         return f"Order for {self.customer.full_name} ({self.status})"
 
+class Invoice(models.Model):
+    order = models.OneToOneField(
+        Order,
+        on_delete=models.CASCADE,
+        related_name="invoice",
+        limit_choices_to={'status': 'confirmed'}
+    )
+    issued_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        limit_choices_to={'role__in': ['admin', 'accountant']}
+    )
+
+    base_amount = models.DecimalField(max_digits=10, decimal_places=2)
+    tax_percentage = models.DecimalField(max_digits=5, decimal_places=2, default=0.0)
+    discount_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0.0)
+    extra_fees = models.DecimalField(max_digits=10, decimal_places=2, default=0.0)
+
+    total_amount = models.DecimalField(max_digits=10, decimal_places=2, editable=False)
+
+    paid = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def calculate_total(self):
+        tax_value = (self.base_amount * self.tax_percentage) / 100
+        return (self.base_amount + tax_value + self.extra_fees) - self.discount_amount
+
+    def save(self, *args, **kwargs):
+        self.total_amount = self.calculate_total()
+        super().save(*args, **kwargs)
+
+    def mark_paid(self):
+        self.paid = True
+        self.save()
+
+    def __str__(self):
+        return f"Invoice #{self.id} - {self.customer.full_name} - Total: {self.total_amount}"

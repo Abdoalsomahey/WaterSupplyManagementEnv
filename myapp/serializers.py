@@ -1,7 +1,7 @@
 from rest_framework import serializers
 from django.contrib.auth import authenticate
 from rest_framework_simplejwt.tokens import RefreshToken
-from .models import User, Customer, Order
+from .models import User, Customer, Order, Invoice
 from drf_spectacular.utils import extend_schema_field
 
 
@@ -26,13 +26,6 @@ class UserSerializer(serializers.ModelSerializer):
             user.is_staff = False
             user.is_superuser = False
         user.save()
-        
-        # if role:
-        #     try:
-        #         group = Group.objects.get(name=role.capitalize())
-        #         user.groups.add(group)
-        #     except Group.DoesNotExist:
-        #         pass
         return user
 
     def update(self, instance, validated_data):
@@ -42,14 +35,6 @@ class UserSerializer(serializers.ModelSerializer):
         if password:
             instance.set_password(password)
         instance.save()
-        # role = validated_data.get('role')
-        # if role:
-        #     instance.groups.clear()
-        #     try:
-        #         group = Group.objects.get(name=role.capitalize())
-        #         instance.groups.add(group)
-        #     except Group.DoesNotExist:
-        #         pass
         return instance
 
 class CustomerSerializer(serializers.ModelSerializer):
@@ -138,3 +123,17 @@ class OrderSerializer(serializers.ModelSerializer):
         if not (request and hasattr(request.user, "role") and request.user.role == "admin"):
             ret.pop("is_late", None)
         return ret
+
+
+class InvoiceSerializer(serializers.ModelSerializer):
+    order = OrderSerializer(read_only=True)
+    issued_by = UserSerializer(read_only=True)
+    customer_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Invoice
+        fields = "__all__"
+        read_only_fields = ["total_amount", "created_at"]
+
+    def get_customer_name(self, obj):
+        return obj.order.customer.full_name

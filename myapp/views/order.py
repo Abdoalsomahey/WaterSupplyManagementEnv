@@ -1,20 +1,26 @@
-from rest_framework import viewsets
+from rest_framework import viewsets, status, filters
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from django_filters.rest_framework import DjangoFilterBackend
+
 from myapp.models import Order
 from myapp.serializers import OrderSerializer
 from myapp.permissions import IsAdmin, IsDriver
-from rest_framework.response import Response
-from rest_framework import status
-from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiTypes
 
 
-# Orders
 class OrderViewSet(viewsets.ModelViewSet):
     queryset = Order.objects.all()
     serializer_class = OrderSerializer
     permission_classes = [IsAuthenticated, IsAdmin]
 
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+
+
+    filterset_fields = ["status", "customer__full_name", "driver__username"]
+    search_fields = ["customer__full_name", "driver__username", "address"]
+    ordering_fields = ["created_at", "confirmed_at", "status"]
+    ordering = ["-created_at"]
 
 
 class DriverOrderViewSet(viewsets.ReadOnlyModelViewSet):
@@ -22,9 +28,14 @@ class DriverOrderViewSet(viewsets.ReadOnlyModelViewSet):
     permission_classes = [IsAuthenticated, IsDriver]
     queryset = Order.objects.none()
 
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ["status"]
+    search_fields = ["customer__full_name", "address"]
+    ordering_fields = ["created_at", "confirmed_at"]
+    ordering = ["-created_at"]
+
     def get_queryset(self):
         return Order.objects.filter(driver=self.request.user)
-
 
     @action(detail=True, methods=["post"])
     def confirm(self, request, pk=None):
