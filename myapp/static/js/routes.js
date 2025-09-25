@@ -7,12 +7,16 @@ import { render_Orders } from './views/ordersViews.js';
 import { render_Complaints } from './views/complaintsViews.js';
 import { render_Invoices } from './views/invoicesViews.js';
 import { render_Users } from './views/usersViews.js';
+import { render_driver } from './views/driverViews.js';
+import { render_NotFound} from './views/errorViews.js';
 import { initDashboard } from './dom/dashboardDom.js';
 import { initUsers } from './dom/usersDom.js';
 import { initCustomers } from './dom/customersDom.js';
 import { initOrders } from './dom/ordersDom.js';
 import { initInvoices } from './dom/invoicesDom.js';
 import { initComplaints } from './dom/complaintsDom.js';
+import { initDriver } from './dom/driverDom.js';
+import { init_NotFound } from './dom/errorDom.js';
 
 const routes = {
 	'/login/': {
@@ -49,6 +53,13 @@ const routes = {
 			console.log('Orders loaded');
 		}
 	},
+	'/driver-orders/': {
+		template: render_driver(),
+		init: () => {
+			initDriver();
+			console.log('Driver Orders loaded');
+		}
+	},
 	'/complaints/': {
 		template: render_Complaints(),
 		init: () => {
@@ -70,13 +81,12 @@ const routes = {
 			console.log('Users loaded');
 		}
 	},
-	'/': {
-		template: render_Dashboard(),
-		init: () => {
-			initDashboard();
-			console.log('Dashboard loaded');
-		}
-	},
+    '/not-found/': {
+        template: render_NotFound(),
+        init: () => {
+            init_NotFound();
+        }
+    },
 };
 
 export default routes;

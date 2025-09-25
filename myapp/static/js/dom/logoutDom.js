@@ -19,5 +19,5 @@ export async function logout() {
 	localStorage.removeItem('user_id');
 	localStorage.removeItem('user_name');
 	localStorage.removeItem('user_role');
-	window.location.href = '/login/';
+	window.location.href = '/';
 }

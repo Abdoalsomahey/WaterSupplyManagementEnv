@@ -1,22 +1,41 @@
-import { mockApi_GetCustomers, sampleCustomers, exportToCSV } from '../apis.js';
+import { 
+    api_GetCustomers, 
+    api_CreateCustomer, 
+    api_GetCustomer, 
+    api_UpdateCustomer, 
+    api_PartialUpdateCustomer, 
+    api_DeleteCustomer, 
+    api_ExportCustomers 
+} from '../apis.js';
 
 let currentCustomers = [];
-let filteredCustomers = [];
 let currentPage = 1;
 const itemsPerPage = 10;
+let totalCount = 0;
+let nextPage = null;
+let previousPage = null;
+let currentQueryParams = '';
 
 export function initCustomers() {
     loadCustomers();
     setupEventListeners();
 }
 
-async function loadCustomers() {
+async function loadCustomers(queryParams = '') {
     try {
         showLoadingState();
         
-        const response = await mockApi_GetCustomers();
-        currentCustomers = await response.json();
-        filteredCustomers = [...currentCustomers];
+        const response = await api_GetCustomers(queryParams);
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
+        const data = await response.json();
+        currentCustomers = data.results;
+        totalCount = data.count;
+        nextPage = data.next;
+        previousPage = data.previous;
+        currentQueryParams = queryParams;
         
         updateCustomersTable();
         updatePagination();
@@ -24,20 +43,17 @@ async function loadCustomers() {
         
     } catch (error) {
         console.error('Error loading customers:', error);
-        showErrorState();
+        showErrorState('Failed to load customers');
     }
 }
 
 function updateCustomersTable() {
     const tbody = document.getElementById('customers-table');
-    const startIndex = (currentPage - 1) * itemsPerPage;
-    const endIndex = startIndex + itemsPerPage;
-    const pageCustomers = filteredCustomers.slice(startIndex, endIndex);
     
-    if (pageCustomers.length === 0) {
+    if (currentCustomers.length === 0) {
         tbody.innerHTML = `
             <tr>
-                <td colspan="9" class="text-center text-muted py-4">
+                <td colspan="11" class="text-center text-muted py-4">
                     <i class="bi bi-inbox fs-1 mb-3 d-block"></i>
                     No customers found
                 </td>
@@ -46,42 +62,29 @@ function updateCustomersTable() {
         return;
     }
     
-    tbody.innerHTML = pageCustomers.map(customer => `
+    tbody.innerHTML = currentCustomers.map(customer => `
         <tr>
             <td>
                 <input type="checkbox" class="form-check-input customer-checkbox" value="${customer.id}">
             </td>
             <td>
-                <div>
-                    <div class="fw-semibold">${customer.name}</div>
-                    <small class="text-muted">ID: ${customer.id}</small>
-                </div>
+                <div class="fw-semibold">${customer.full_name || 'N/A'}</div>
+                <small class="text-muted">ID: ${customer.id}</small>
             </td>
+            <td>${customer.driver || 'N/A'}</td>
+            <td>${customer.area || 'N/A'}</td>
+            <td>${customer.zone_number || 'N/A'}</td>
+            <td>${customer.plot_number || 'N/A'}</td>
+            <td>${customer.phone || 'N/A'}</td>
             <td>
-                <div>
-                    <div class="fw-medium">${customer.contact_person}</div>
-                </div>
+                <span class="badge bg-${getStatusColor(customer.agreement_without_meter)}">
+                    ${customer.agreement_without_meter ? 'Without Meter' : 'With Meter'}
+                </span>
             </td>
+            <td>${customer.weekly_trips || 0}</td>
+            <td>${formatTime(customer.delivery_time)}</td>
             <td>
-                <div>
-                    <div class="small">${customer.email}</div>
-                    <div class="small text-muted">${customer.phone}</div>
-                </div>
-            </td>
-            <td>
-                <span class="badge bg-${getOrderVolumeColor(customer.orders_count)}">${customer.orders_count}</span>
-            </td>
-            <td>
-                <div class="fw-semibold">$${customer.total_spent.toFixed(2)}</div>
-            </td>
-            <td>
-                <span class="status-badge ${customer.status}">${customer.status}</span>
-            </td>
-            <td>
-                <div class="small">${formatDate(customer.last_order)}</div>
-            </td>
-            <td>
-                <div class="data-table-actions">
+                <div class="d-flex gap-1">
                     <button class="btn btn-sm btn-outline-primary btn-action" onclick="viewCustomer(${customer.id})" title="View">
                         <i class="bi bi-eye"></i>
                     </button>
@@ -101,7 +104,7 @@ function updateCustomersTable() {
 
 function updatePagination() {
     const pagination = document.getElementById('customers-pagination');
-    const totalPages = Math.ceil(filteredCustomers.length / itemsPerPage);
+    const totalPages = Math.ceil(totalCount / itemsPerPage);
     
     if (totalPages <= 1) {
         pagination.innerHTML = '';
@@ -112,28 +115,32 @@ function updatePagination() {
     
     // Previous button
     paginationHTML += `
-        <li class="page-item ${currentPage === 1 ? 'disabled' : ''}">
-            <a class="page-link" href="#" onclick="changePage(${currentPage - 1})">Previous</a>
+        <li class="page-item ${!previousPage ? 'disabled' : ''}">
+            <a class="page-link" href="#" onclick="changePage('${previousPage || ''}')">Previous</a>
         </li>
     `;
     
     // Page numbers
-    for (let i = 1; i <= totalPages; i++) {
-        if (i === 1 || i === totalPages || (i >= currentPage - 2 && i <= currentPage + 2)) {
-            paginationHTML += `
-                <li class="page-item ${i === currentPage ? 'active' : ''}">
-                    <a class="page-link" href="#" onclick="changePage(${i})">${i}</a>
-                </li>
-            `;
-        } else if (i === currentPage - 3 || i === currentPage + 3) {
-            paginationHTML += '<li class="page-item disabled"><span class="page-link">...</span></li>';
-        }
+    const maxVisiblePages = 5;
+    let startPage = Math.max(1, currentPage - Math.floor(maxVisiblePages / 2));
+    let endPage = Math.min(totalPages, startPage + maxVisiblePages - 1);
+    
+    if (endPage - startPage + 1 < maxVisiblePages) {
+        startPage = Math.max(1, endPage - maxVisiblePages + 1);
+    }
+    
+    for (let i = startPage; i <= endPage; i++) {
+        paginationHTML += `
+            <li class="page-item ${i === currentPage ? 'active' : ''}">
+                <a class="page-link" href="#" onclick="changePage(${i})">${i}</a>
+            </li>
+        `;
     }
     
     // Next button
     paginationHTML += `
-        <li class="page-item ${currentPage === totalPages ? 'disabled' : ''}">
-            <a class="page-link" href="#" onclick="changePage(${currentPage + 1})">Next</a>
+        <li class="page-item ${!nextPage ? 'disabled' : ''}">
+            <a class="page-link" href="#" onclick="changePage('${nextPage || ''}')">Next</a>
         </li>
     `;
     
@@ -141,37 +148,27 @@ function updatePagination() {
 }
 
 function updateCustomerCounts() {
-    document.getElementById('customers-count').textContent = filteredCustomers.length;
-    document.getElementById('total-customers').textContent = currentCustomers.length;
+    document.getElementById('customers-count').textContent = currentCustomers.length;
+    document.getElementById('total-customers').textContent = totalCount;
 }
 
 function setupEventListeners() {
     // Search functionality
     const searchInput = document.getElementById('customer-search');
     if (searchInput) {
-        searchInput.addEventListener('input', debounce(handleSearch, 300));
+        searchInput.addEventListener('input', debounce(handleSearch, 500));
     }
     
     // Filter functionality
+    const areaFilter = document.getElementById('area-filter');
     const statusFilter = document.getElementById('status-filter');
-    const ordersFilter = document.getElementById('orders-filter');
-    const dateFrom = document.getElementById('date-from');
-    const dateTo = document.getElementById('date-to');
+    
+    if (areaFilter) {
+        areaFilter.addEventListener('change', handleFilter);
+    }
     
     if (statusFilter) {
         statusFilter.addEventListener('change', handleFilter);
-    }
-    
-    if (ordersFilter) {
-        ordersFilter.addEventListener('change', handleFilter);
-    }
-    
-    if (dateFrom) {
-        dateFrom.addEventListener('change', handleFilter);
-    }
-    
-    if (dateTo) {
-        dateTo.addEventListener('change', handleFilter);
     }
     
     // Clear filters
@@ -188,14 +185,8 @@ function setupEventListeners() {
     
     // Bulk actions
     const bulkExportBtn = document.getElementById('bulk-export');
-    const bulkEmailBtn = document.getElementById('bulk-email');
-    
     if (bulkExportBtn) {
         bulkExportBtn.addEventListener('click', handleBulkExport);
-    }
-    
-    if (bulkEmailBtn) {
-        bulkEmailBtn.addEventListener('click', handleBulkEmail);
     }
     
     // Export button
@@ -212,116 +203,44 @@ function setupEventListeners() {
 }
 
 function handleSearch(e) {
-    const searchTerm = e.target.value.toLowerCase();
+    const searchTerm = e.target.value.trim();
+    let queryParams = '';
     
-    filteredCustomers = currentCustomers.filter(customer => 
-        customer.name.toLowerCase().includes(searchTerm) ||
-        customer.contact_person.toLowerCase().includes(searchTerm) ||
-        customer.email.toLowerCase().includes(searchTerm) ||
-        customer.phone.includes(searchTerm)
-    );
+    if (searchTerm) {
+        queryParams = `?search=${encodeURIComponent(searchTerm)}`;
+    }
     
     currentPage = 1;
-    updateCustomersTable();
-    updatePagination();
-    updateCustomerCounts();
-    updateActiveFilters();
+    loadCustomers(queryParams);
 }
 
 function handleFilter() {
+    const areaFilter = document.getElementById('area-filter').value;
     const statusFilter = document.getElementById('status-filter').value;
-    const ordersFilter = document.getElementById('orders-filter').value;
-    const dateFrom = document.getElementById('date-from').value;
-    const dateTo = document.getElementById('date-to').value;
     
-    filteredCustomers = currentCustomers.filter(customer => {
-        const statusMatch = !statusFilter || customer.status === statusFilter;
-        
-        let ordersMatch = true;
-        if (ordersFilter) {
-            const orderCount = customer.orders_count;
-            switch (ordersFilter) {
-                case 'high': ordersMatch = orderCount >= 15; break;
-                case 'medium': ordersMatch = orderCount >= 5 && orderCount < 15; break;
-                case 'low': ordersMatch = orderCount < 5; break;
-            }
-        }
-        
-        let dateMatch = true;
-        if (dateFrom || dateTo) {
-            const customerDate = new Date(customer.created_at);
-            if (dateFrom) {
-                const fromDate = new Date(dateFrom);
-                dateMatch = dateMatch && customerDate >= fromDate;
-            }
-            if (dateTo) {
-                const toDate = new Date(dateTo);
-                toDate.setHours(23, 59, 59, 999);
-                dateMatch = dateMatch && customerDate <= toDate;
-            }
-        }
-        
-        return statusMatch && ordersMatch && dateMatch;
-    });
+    let queryParams = '?';
+    const params = [];
     
-    currentPage = 1;
-    updateCustomersTable();
-    updatePagination();
-    updateCustomerCounts();
-    updateActiveFilters();
-}
-
-function updateActiveFilters() {
-    const activeFiltersContainer = document.getElementById('active-filters');
-    const filters = [];
-    
-    const statusFilter = document.getElementById('status-filter').value;
-    const ordersFilter = document.getElementById('orders-filter').value;
-    const dateFrom = document.getElementById('date-from').value;
-    const dateTo = document.getElementById('date-to').value;
+    if (areaFilter) {
+        params.push(`area=${encodeURIComponent(areaFilter)}`);
+    }
     
     if (statusFilter) {
-        filters.push({ type: 'status', value: statusFilter, label: `Status: ${statusFilter}` });
+        params.push(`agreement_without_meter=${statusFilter === 'without'}`);
     }
     
-    if (ordersFilter) {
-        filters.push({ type: 'orders', value: ordersFilter, label: `Orders: ${ordersFilter}` });
-    }
-    
-    if (dateFrom) {
-        filters.push({ type: 'dateFrom', value: dateFrom, label: `From: ${dateFrom}` });
-    }
-    
-    if (dateTo) {
-        filters.push({ type: 'dateTo', value: dateTo, label: `To: ${dateTo}` });
-    }
-    
-    if (filters.length === 0) {
-        activeFiltersContainer.innerHTML = '';
-        return;
-    }
-    
-    activeFiltersContainer.innerHTML = filters.map(filter => `
-        <div class="filter-tag">
-            ${filter.label}
-            <button type="button" class="btn-close" onclick="removeFilter('${filter.type}')"></button>
-        </div>
-    `).join('');
+    queryParams += params.join('&');
+    currentPage = 1;
+    loadCustomers(queryParams);
 }
 
 function clearFilters() {
     document.getElementById('customer-search').value = '';
+    document.getElementById('area-filter').value = '';
     document.getElementById('status-filter').value = '';
-    document.getElementById('orders-filter').value = '';
-    document.getElementById('date-from').value = '';
-    document.getElementById('date-to').value = '';
     
-    filteredCustomers = [...currentCustomers];
     currentPage = 1;
-    updateCustomersTable();
-    updatePagination();
-    updateCustomerCounts();
-    updateActiveFilters();
+    loadCustomers('');
 }
 
 function handleSelectAll(e) {
@@ -343,134 +262,279 @@ function updateBulkActionsVisibility() {
     }
 }
 
-function handleBulkExport() {
+async function handleBulkExport() {
     const checkedBoxes = document.querySelectorAll('.customer-checkbox:checked');
     const customerIds = Array.from(checkedBoxes).map(cb => parseInt(cb.value));
     
     if (customerIds.length === 0) {
-        showToast('Please select customers to export', 'warning');
+        alert('Please select customers to export');
         return;
     }
     
-    const customersToExport = currentCustomers.filter(c => customerIds.includes(c.id));
-    const dataToExport = customersToExport.map(customer => ({
-        ID: customer.id,
-        Name: customer.name,
-        'Contact Person': customer.contact_person,
-        Email: customer.email,
-        Phone: customer.phone,
-        Address: customer.address,
-        'Orders Count': customer.orders_count,
-        'Total Spent': customer.total_spent,
-        Status: customer.status,
-        'Created At': formatDate(customer.created_at),
-        'Last Order': formatDate(customer.last_order)
-    }));
-    
-    exportToCSV(dataToExport, 'selected_customers');
-    showToast(`Exported ${customerIds.length} customer(s)`, 'success');
-}
-
-function handleBulkEmail() {
-    const checkedBoxes = document.querySelectorAll('.customer-checkbox:checked');
-    const customerIds = Array.from(checkedBoxes).map(cb => parseInt(cb.value));
-    
-    if (customerIds.length === 0) {
-        showToast('Please select customers to send email', 'warning');
-        return;
+    try {
+        const queryParams = currentQueryParams ? `${currentQueryParams}&ids=${customerIds.join(',')}` : `?ids=${customerIds.join(',')}`;
+        const response = await api_ExportCustomers(queryParams);
+        
+        if (response.ok) {
+            const blob = await response.blob();
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'customers_export.csv';
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+            document.body.removeChild(a);
+        } else {
+            throw new Error('Export failed');
+        }
+    } catch (error) {
+        console.error('Export error:', error);
+        alert('Error exporting customers');
     }
-    
-    showToast(`Email functionality for ${customerIds.length} customer(s) would be implemented here`, 'info');
 }
 
-function handleExport() {
-    const dataToExport = filteredCustomers.map(customer => ({
-        ID: customer.id,
-        Name: customer.name,
-        'Contact Person': customer.contact_person,
-        Email: customer.email,
-        Phone: customer.phone,
-        Address: customer.address,
-        'Orders Count': customer.orders_count,
-        'Total Spent': customer.total_spent,
-        Status: customer.status,
-        'Created At': formatDate(customer.created_at),
-        'Last Order': formatDate(customer.last_order)
-    }));
-    
-    exportToCSV(dataToExport, 'customers');
-    showToast('Customers exported successfully', 'success');
+async function handleExport() {
+    try {
+        const response = await api_ExportCustomers(currentQueryParams);
+        
+        if (response.ok) {
+            const blob = await response.blob();
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'customers_export.csv';
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+            document.body.removeChild(a);
+        } else {
+            throw new Error('Export failed');
+        }
+    } catch (error) {
+        console.error('Export error:', error);
+        alert('Error exporting customers');
+    }
 }
 
+// Modal Functions
 function showAddCustomerModal() {
-    showToast('Add customer functionality would be implemented here', 'info');
+    const modalHTML = `
+        <div class="modal fade" id="addCustomerModal" tabindex="-1">
+            <div class="modal-dialog modal-lg">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title">Add New Customer</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <form id="addCustomerForm">
+                            <div class="row g-3">
+                                <div class="col-md-6">
+                                    <label class="form-label">Full Name *</label>
+                                    <input type="text" class="form-control" name="full_name" required>
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label">Phone *</label>
+                                    <input type="tel" class="form-control" name="phone" required>
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label">Area</label>
+                                    <input type="text" class="form-control" name="area">
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label">Zone Number</label>
+                                    <input type="text" class="form-control" name="zone_number">
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label">Plot Number</label>
+                                    <input type="text" class="form-control" name="plot_number">
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label">Property Type</label>
+                                    <input type="text" class="form-control" name="property_type">
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label">Account Number</label>
+                                    <input type="text" class="form-control" name="account_number">
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label">Starting Date</label>
+                                    <input type="date" class="form-control" name="starting_date">
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label">Weekly Trips</label>
+                                    <input type="number" class="form-control" name="weekly_trips" value="0">
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label">Delivery Time</label>
+                                    <input type="time" class="form-control" name="delivery_time">
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label">Gallons</label>
+                                    <input type="number" class="form-control" name="gallons" value="0">
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label">Filling Stations</label>
+                                    <input type="text" class="form-control" name="filling_stations">
+                                </div>
+                                <div class="col-12">
+                                    <label class="form-label">Location Link</label>
+                                    <input type="url" class="form-control" name="location_link">
+                                </div>
+                                <div class="col-12">
+                                    <label class="form-label">Delivery Days</label>
+                                    <div class="delivery-days-checkboxes">
+                                        ${['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+                                            .map(day => `
+                                            <div class="form-check form-check-inline">
+                                                <input class="form-check-input" type="checkbox" name="delivery_days" value="${day.toLowerCase()}">
+                                                <label class="form-check-label">${day}</label>
+                                            </div>
+                                        `).join('')}
+                                    </div>
+                                </div>
+                                <div class="col-12">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" name="agreement_without_meter">
+                                        <label class="form-check-label">Agreement Without Meter</label>
+                                    </div>
+                                </div>
+                            </div>
+                        </form>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                        <button type="button" class="btn btn-primary" onclick="saveCustomer()">Save Customer</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    // Remove existing modal if any
+    const existingModal = document.getElementById('addCustomerModal');
+    if (existingModal) {
+        existingModal.remove();
+    }
+    
+    document.body.insertAdjacentHTML('beforeend', modalHTML);
+    const modal = new bootstrap.Modal(document.getElementById('addCustomerModal'));
+    modal.show();
 }
 
 // Global functions for inline event handlers
-window.viewCustomer = function(customerId) {
-    const customer = currentCustomers.find(c => c.id === customerId);
-    if (customer) {
-        showToast(`Viewing customer: ${customer.name}`, 'info');
+window.viewCustomer = async function(customerId) {
+    try {
+        const response = await api_GetCustomer(customerId);
+        if (response.ok) {
+            const customer = await response.json();
+            showCustomerModal(customer, 'view');
+        }
+    } catch (error) {
+        console.error('Error viewing customer:', error);
+        alert('Error loading customer details');
     }
 };
 
-window.editCustomer = function(customerId) {
-    const customer = currentCustomers.find(c => c.id === customerId);
-    if (customer) {
-        showToast(`Editing customer: ${customer.name}`, 'info');
+window.editCustomer = async function(customerId) {
+    try {
+        const response = await api_GetCustomer(customerId);
+        if (response.ok) {
+            const customer = await response.json();
+            showCustomerModal(customer, 'edit');
+        }
+    } catch (error) {
+        console.error('Error editing customer:', error);
+        alert('Error loading customer details');
     }
 };
 
-window.deleteCustomer = function(customerId) {
+window.deleteCustomer = async function(customerId) {
     const customer = currentCustomers.find(c => c.id === customerId);
-    if (customer && confirm(`Are you sure you want to delete customer: ${customer.name}?`)) {
-        currentCustomers = currentCustomers.filter(c => c.id !== customerId);
-        filteredCustomers = filteredCustomers.filter(c => c.id !== customerId);
-        updateCustomersTable();
-        updatePagination();
-        updateCustomerCounts();
-        showToast('Customer deleted successfully', 'success');
+    if (customer && confirm(`Are you sure you want to delete customer: ${customer.full_name}?`)) {
+        try {
+            const response = await api_DeleteCustomer(customerId);
+            if (response.ok) {
+                loadCustomers(currentQueryParams);
+                alert('Customer deleted successfully');
+            } else {
+                throw new Error('Delete failed');
+            }
+        } catch (error) {
+            console.error('Error deleting customer:', error);
+            alert('Error deleting customer');
+        }
     }
 };
 
 window.changePage = function(page) {
-    const totalPages = Math.ceil(filteredCustomers.length / itemsPerPage);
-    if (page >= 1 && page <= totalPages) {
-        currentPage = page;
-        updateCustomersTable();
-        updatePagination();
+    if (typeof page === 'string' && page.includes('page=')) {
+        // Handle next/previous URLs
+        const url = new URL(page);
+        const queryParams = url.search;
+        loadCustomers(queryParams);
+    } else {
+        // Handle page numbers
+        const baseParams = currentQueryParams ? currentQueryParams + '&' : '?';
+        loadCustomers(`${baseParams}page=${page}`);
     }
 };
 
-window.removeFilter = function(filterType) {
-    switch (filterType) {
-        case 'status':
-            document.getElementById('status-filter').value = '';
-            break;
-        case 'orders':
-            document.getElementById('orders-filter').value = '';
-            break;
-        case 'dateFrom':
-            document.getElementById('date-from').value = '';
-            break;
-        case 'dateTo':
-            document.getElementById('date-to').value = '';
-            break;
+window.saveCustomer = async function() {
+    const form = document.getElementById('addCustomerForm');
+    const formData = new FormData(form);
+    
+    const customerData = {
+        full_name: formData.get('full_name'),
+        phone: formData.get('phone'),
+        area: formData.get('area'),
+        zone_number: formData.get('zone_number'),
+        plot_number: formData.get('plot_number'),
+        property_type: formData.get('property_type'),
+        account_number: formData.get('account_number'),
+        starting_date: formData.get('starting_date'),
+        weekly_trips: parseInt(formData.get('weekly_trips')) || 0,
+        delivery_time: formData.get('delivery_time'),
+        gallons: parseInt(formData.get('gallons')) || 0,
+        filling_stations: formData.get('filling_stations'),
+        location_link: formData.get('location_link'),
+        agreement_without_meter: formData.get('agreement_without_meter') === 'on',
+        delivery_days: Array.from(formData.getAll('delivery_days'))
+    };
+    
+    try {
+        const response = await api_CreateCustomer(customerData);
+        if (response.ok) {
+            const modal = bootstrap.Modal.getInstance(document.getElementById('addCustomerModal'));
+            modal.hide();
+            loadCustomers(currentQueryParams);
+            alert('Customer created successfully');
+        } else {
+            const errorData = await response.json();
+            throw new Error(errorData.detail || 'Create failed');
+        }
+    } catch (error) {
+        console.error('Error creating customer:', error);
+        alert('Error creating customer: ' + error.message);
     }
-    handleFilter();
 };
 
-function getOrderVolumeColor(orderCount) {
-    if (orderCount >= 15) return 'success';
-    if (orderCount >= 5) return 'warning';
-    return 'secondary';
+// Helper functions
+function getStatusColor(agreementWithoutMeter) {
+    return agreementWithoutMeter ? 'warning' : 'success';
+}
+
+function formatTime(timeString) {
+    if (!timeString) return 'N/A';
+    return timeString.split('T')[1]?.split('.')[0] || timeString;
 }
 
 function showLoadingState() {
     const tbody = document.getElementById('customers-table');
     tbody.innerHTML = `
         <tr>
-            <td colspan="9" class="text-center text-muted py-4">
+            <td colspan="11" class="text-center text-muted py-4">
                 <div class="spinner-border spinner-border-sm me-2"></div>
                 Loading customers...
             </td>
@@ -478,26 +542,16 @@ function showLoadingState() {
     `;
 }
 
-function showErrorState() {
+function showErrorState(message) {
     const tbody = document.getElementById('customers-table');
     tbody.innerHTML = `
         <tr>
-            <td colspan="9" class="text-center text-muted py-4">
+            <td colspan="11" class="text-center text-muted py-4">
                 <i class="bi bi-exclamation-triangle fs-1 mb-3 d-block text-danger"></i>
-                Error loading customers. Please try again.
+                ${message}
             </td>
         </tr>
     `;
-}
-
-function formatDate(dateString) {
-    if (!dateString) return 'N/A';
-    const date = new Date(dateString);
-    return date.toLocaleDateString('en-US', {
-        month: 'short',
-        day: 'numeric',
-        year: 'numeric'
-    });
 }
 
 function debounce(func, wait) {
@@ -512,13 +566,154 @@ function debounce(func, wait) {
     };
 }
 
-function showToast(message, type = 'info') {
-    const toast = document.getElementById('toast');
-    const toastMessage = document.getElementById('toast-message');
+// Customer Modal for View/Edit
+function showCustomerModal(customer, mode) {
+    const modalTitle = mode === 'view' ? 'View Customer' : 'Edit Customer';
+    const readOnly = mode === 'view' ? 'readonly' : '';
     
-    toastMessage.textContent = message;
-    toast.className = `toast ${type === 'success' ? 'bg-success' : type === 'warning' ? 'bg-warning' : type === 'error' ? 'bg-danger' : 'bg-info'} text-white`;
+    const modalHTML = `
+        <div class="modal fade" id="customerModal" tabindex="-1">
+            <div class="modal-dialog modal-lg">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title">${modalTitle} - ${customer.full_name}</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <form id="customerForm">
+                            <div class="row g-3">
+                                <div class="col-md-6">
+                                    <label class="form-label">Full Name</label>
+                                    <input type="text" class="form-control" name="full_name" value="${customer.full_name || ''}" ${readOnly}>
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label">Phone</label>
+                                    <input type="tel" class="form-control" name="phone" value="${customer.phone || ''}" ${readOnly}>
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label">Area</label>
+                                    <input type="text" class="form-control" name="area" value="${customer.area || ''}" ${readOnly}>
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label">Zone Number</label>
+                                    <input type="text" class="form-control" name="zone_number" value="${customer.zone_number || ''}" ${readOnly}>
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label">Plot Number</label>
+                                    <input type="text" class="form-control" name="plot_number" value="${customer.plot_number || ''}" ${readOnly}>
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label">Property Type</label>
+                                    <input type="text" class="form-control" name="property_type" value="${customer.property_type || ''}" ${readOnly}>
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label">Account Number</label>
+                                    <input type="text" class="form-control" name="account_number" value="${customer.account_number || ''}" ${readOnly}>
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label">Starting Date</label>
+                                    <input type="date" class="form-control" name="starting_date" value="${customer.starting_date || ''}" ${readOnly}>
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label">Weekly Trips</label>
+                                    <input type="number" class="form-control" name="weekly_trips" value="${customer.weekly_trips || 0}" ${readOnly}>
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label">Delivery Time</label>
+                                    <input type="time" class="form-control" name="delivery_time" value="${formatTime(customer.delivery_time)}" ${readOnly}>
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label">Gallons</label>
+                                    <input type="number" class="form-control" name="gallons" value="${customer.gallons || 0}" ${readOnly}>
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label">Filling Stations</label>
+                                    <input type="text" class="form-control" name="filling_stations" value="${customer.filling_stations || ''}" ${readOnly}>
+                                </div>
+                                <div class="col-12">
+                                    <label class="form-label">Location Link</label>
+                                    <input type="url" class="form-control" name="location_link" value="${customer.location_link || ''}" ${readOnly}>
+                                </div>
+                                <div class="col-12">
+                                    <label class="form-label">Delivery Days</label>
+                                    <div class="delivery-days-checkboxes">
+                                        ${['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']
+                                            .map(day => `
+                                            <div class="form-check form-check-inline">
+                                                <input class="form-check-input" type="checkbox" name="delivery_days" value="${day}" 
+                                                    ${customer.delivery_days?.includes(day) ? 'checked' : ''} ${readOnly ? 'disabled' : ''}>
+                                                <label class="form-check-label">${day.charAt(0).toUpperCase() + day.slice(1)}</label>
+                                            </div>
+                                        `).join('')}
+                                    </div>
+                                </div>
+                                <div class="col-12">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" name="agreement_without_meter" 
+                                            ${customer.agreement_without_meter ? 'checked' : ''} ${readOnly ? 'disabled' : ''}>
+                                        <label class="form-check-label">Agreement Without Meter</label>
+                                    </div>
+                                </div>
+                            </div>
+                        </form>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                        ${mode === 'edit' ? `
+                            <button type="button" class="btn btn-primary" onclick="updateCustomer(${customer.id})">Update Customer</button>
+                        ` : ''}
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
     
-    const bsToast = new bootstrap.Toast(toast);
-    bsToast.show();
+    // Remove existing modal if any
+    const existingModal = document.getElementById('customerModal');
+    if (existingModal) {
+        existingModal.remove();
+    }
+    
+    document.body.insertAdjacentHTML('beforeend', modalHTML);
+    const modal = new bootstrap.Modal(document.getElementById('customerModal'));
+    modal.show();
 }
+
+window.updateCustomer = async function(customerId) {
+    const form = document.getElementById('customerForm');
+    const formData = new FormData(form);
+    
+    const customerData = {
+        full_name: formData.get('full_name'),
+        phone: formData.get('phone'),
+        area: formData.get('area'),
+        zone_number: formData.get('zone_number'),
+        plot_number: formData.get('plot_number'),
+        property_type: formData.get('property_type'),
+        account_number: formData.get('account_number'),
+        starting_date: formData.get('starting_date'),
+        weekly_trips: parseInt(formData.get('weekly_trips')) || 0,
+        delivery_time: formData.get('delivery_time'),
+        gallons: parseInt(formData.get('gallons')) || 0,
+        filling_stations: formData.get('filling_stations'),
+        location_link: formData.get('location_link'),
+        agreement_without_meter: formData.get('agreement_without_meter') === 'on',
+        delivery_days: Array.from(formData.getAll('delivery_days'))
+    };
+    
+    try {
+        const response = await api_PartialUpdateCustomer(customerId, customerData);
+        if (response.ok) {
+            const modal = bootstrap.Modal.getInstance(document.getElementById('customerModal'));
+            modal.hide();
+            loadCustomers(currentQueryParams);
+            alert('Customer updated successfully');
+        } else {
+            const errorData = await response.json();
+            throw new Error(errorData.detail || 'Update failed');
+        }
+    } catch (error) {
+        console.error('Error updating customer:', error);
+        alert('Error updating customer: ' + error.message);
+    }
+};

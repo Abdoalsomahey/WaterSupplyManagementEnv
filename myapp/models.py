@@ -19,7 +19,14 @@ class User(AbstractUser):
 
 class Customer(models.Model):
     full_name = models.CharField(max_length=255, unique=True, blank=True, null=True)
-
+    driver = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        limit_choices_to={'role': 'driver'},
+        related_name="customers"
+    )
     area = models.CharField(max_length=255, blank=True, null=True)
     zone_number = models.CharField(max_length=100, blank=True, null=True)
     plot_number = models.CharField(max_length=100, blank=True, null=True)
@@ -30,11 +37,10 @@ class Customer(models.Model):
     agreement_without_meter = models.BooleanField(default=False)
 
     weekly_trips = models.IntegerField(blank=True, null=True)
-    two_trips = models.IntegerField(blank=True, null=True)
-    three_trips = models.IntegerField(blank=True, null=True)
-    four_trips = models.IntegerField(blank=True, null=True)
+    delivery_days = models.JSONField(default=list, blank=True)
+    delivery_time = models.TimeField(null=True, blank=True) 
 
-    gallons = models.CharField(max_length=100, blank=True, null=True)
+    gallons = models.IntegerField(blank=True, null=True)
     filling_stations = models.CharField(max_length=255, blank=True, null=True)
     location_link = models.URLField(blank=True, null=True)
 
@@ -48,20 +54,49 @@ class Order(models.Model):
         ("confirmed", "Confirmed"),
         ("completed", "Completed"),
         ("canceled", "Canceled"),
+        ("problem", "Problem"),
     ]
 
-    customer = models.ForeignKey(Customer, on_delete=models.CASCADE, related_name="orders")
-    driver = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, limit_choices_to={'role': 'driver'})
-    
-    description = models.TextField(blank=True, null=True)
+    customer = models.ForeignKey(
+        Customer,
+        on_delete=models.CASCADE,
+        related_name="orders"
+    )
+    driver = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        limit_choices_to={'role': 'driver'}
+    )
+    proof_image = models.ImageField(
+        upload_to="orders/proofs/",
+        blank=True,
+        null=True
+    )
+    delivery_time = models.DateTimeField(null=True, blank=True)
+    required_gallons = models.IntegerField(null=True, blank=True)
+    customer_location = models.URLField(null=True, blank=True)
+    filled_amount = models.IntegerField(null=True, blank=True)
+    problem_reason = models.CharField(max_length=255, blank=True, null=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="pending")
-
     created_at = models.DateTimeField(auto_now_add=True)
     confirmed_at = models.DateTimeField(null=True, blank=True)
 
-    def confirm(self):
+    def confirm(self, filled_amount, proof_image):
+        if not proof_image:
+            raise ValueError("Proof image is required")
+        if not filled_amount:
+            raise ValueError("Filled amount is required")
         self.status = "confirmed"
+        self.filled_amount = filled_amount
+        self.proof_image = proof_image
         self.confirmed_at = timezone.now()
+        self.save()
+
+    def mark_problem(self, reason):
+        self.status = "problem"
+        self.problem_reason = reason
         self.save()
 
     def is_driver_late(self, minutes=30):
@@ -72,42 +107,50 @@ class Order(models.Model):
     def __str__(self):
         return f"Order for {self.customer.full_name} ({self.status})"
 
-class Invoice(models.Model):
-    order = models.OneToOneField(
-        Order,
-        on_delete=models.CASCADE,
-        related_name="invoice",
-        limit_choices_to={'status': 'confirmed'}
-    )
-    issued_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        limit_choices_to={'role__in': ['admin', 'accountant']}
-    )
+class RecheckInvoice(models.Model):
+    STATUS_CHOICES = [
+        ("draft", "Draft"),
+        ("sent", "Sent to Accountant"),
+    ]
 
-    base_amount = models.DecimalField(max_digits=10, decimal_places=2)
-    tax_percentage = models.DecimalField(max_digits=5, decimal_places=2, default=0.0)
-    discount_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0.0)
-    extra_fees = models.DecimalField(max_digits=10, decimal_places=2, default=0.0)
-
-    total_amount = models.DecimalField(max_digits=10, decimal_places=2, editable=False)
-
-    paid = models.BooleanField(default=False)
+    customer = models.ForeignKey(Customer, on_delete=models.CASCADE, related_name="rechecks")
+    period_start = models.DateField(null=True, blank=True)
+    period_end = models.DateField(null=True, blank=True)
+    total_trips = models.IntegerField(default=0)
+    total_gallons = models.IntegerField(default=0)
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="created_rechecks")
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="draft")
     created_at = models.DateTimeField(auto_now_add=True)
 
-    def calculate_total(self):
-        tax_value = (self.base_amount * self.tax_percentage) / 100
-        return (self.base_amount + tax_value + self.extra_fees) - self.discount_amount
-
-    def save(self, *args, **kwargs):
-        self.total_amount = self.calculate_total()
-        super().save(*args, **kwargs)
-
-    def mark_paid(self):
-        self.paid = True
-        self.save()
+    class Meta:
+        unique_together = ("customer", "period_start")
+        ordering = ["-period_start"]
 
     def __str__(self):
-        return f"Invoice #{self.id} - {self.customer.full_name} - Total: {self.total_amount}"
+        return f"Recheck {self.customer.full_name} ({self.period_start} → {self.period_end})"
+
+
+class FinalInvoice(models.Model):
+
+    recheck = models.OneToOneField(RecheckInvoice, on_delete=models.CASCADE, related_name="final_invoice")
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, limit_choices_to={'role': 'accountant'})
+    price_per_gallon = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    subtotal = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    vat_percent = models.DecimalField(max_digits=5, decimal_places=2, default=5.0)
+    vat_amount = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    total = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    notes = models.TextField(blank=True, null=True)
+    finalized_at = models.DateTimeField(auto_now_add=True)
+
+    def calculate_totals(self):
+        gallons = self.recheck.total_gallons or 0
+        self.subtotal = round(gallons * float(self.price_per_gallon), 2)
+        self.vat_amount = round(self.subtotal * (float(self.vat_percent) / 100.0), 2)
+        self.total = round(self.subtotal + self.vat_amount, 2)
+
+    def save(self, *args, **kwargs):
+        self.calculate_totals()
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"FinalInvoice #{self.id} - {self.recheck.customer.full_name} - {self.recheck.month.strftime('%Y-%m')}"

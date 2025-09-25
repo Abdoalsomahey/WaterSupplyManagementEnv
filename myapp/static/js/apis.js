@@ -39,10 +39,10 @@ export async function api_RefreshToken(refreshToken) {
     return await response;
 }
 
-// ---------------- Users API ----------------
-export async function api_GetUsers() {
+// ==================== USERS ====================
+export async function api_GetUsers(query = "") {
     const token = localStorage.getItem('access_token');
-    return await fetch('/api/users/', {
+    return await fetch(`/api/users/${query}`, {
         headers: { 'Authorization': `Bearer ${token}` }
     });
 }
@@ -79,10 +79,17 @@ export async function api_DeleteUser(userId) {
     });
 }
 
-
-export async function api_GetCustomers() {
+export async function api_ExportUsers(query = "") {
     const token = localStorage.getItem('access_token');
-    return await fetch('/api/customers/', {
+    return await fetch(`/api/users/export_excel/${query}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+    });
+}
+
+// ==================== CUSTOMERS ====================
+export async function api_GetCustomers(query = "") {
+    const token = localStorage.getItem('access_token');
+    return await fetch(`/api/customers/${query}`, {
         headers: { 'Authorization': `Bearer ${token}` }
     });
 }
@@ -96,13 +103,6 @@ export async function api_CreateCustomer(data) {
             'Content-Type': 'application/json'
         },
         body: JSON.stringify(data)
-    });
-}
-
-export async function api_ExportUsers() {
-    const token = localStorage.getItem('access_token');
-    return await fetch('/api/users/export/', {
-        headers: { 'Authorization': `Bearer ${token}` }
     });
 }
 
@@ -145,46 +145,47 @@ export async function api_DeleteCustomer(id) {
     });
 }
 
-export async function api_ExportCustomers() {
+export async function api_ExportCustomers(query = "") {
     const token = localStorage.getItem('access_token');
-    return await fetch('/api/customers/export/', {
+    return await fetch(`/api/customers/export_excel/${query}`, {
         headers: { 'Authorization': `Bearer ${token}` }
     });
 }
 
-export async function api_GetDriverOrders() {
+// ==================== RECHECK INVOICES (Admin) ====================
+export async function api_GetRechecks(query = "") {
     const token = localStorage.getItem('access_token');
-    return await fetch('/api/driver/orders/', {
+    return await fetch(`/api/rechecks/${query}`, {
         headers: { 'Authorization': `Bearer ${token}` }
     });
 }
 
-export async function api_GetDriverOrder(id) {
+export async function api_SendRecheckToAccountant(id) {
     const token = localStorage.getItem('access_token');
-    return await fetch(`/api/driver/orders/${id}/`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-    });
-}
-
-export async function api_ConfirmDriverOrder(id) {
-    const token = localStorage.getItem('access_token');
-    return await fetch(`/api/driver/orders/${id}/confirm/`, {
+    return await fetch(`/api/rechecks/${id}/send_to_accountant/`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}` }
     });
 }
 
-
-export async function api_GetInvoices() {
+export async function api_ExportRechecksExcel(query = "") {
     const token = localStorage.getItem('access_token');
-    return await fetch('/api/invoices/', {
+    return await fetch(`/api/rechecks/export_excel/${query}`, {
         headers: { 'Authorization': `Bearer ${token}` }
     });
 }
 
-export async function api_CreateInvoice(data) {
+// ==================== FINAL INVOICES (Accountant) ====================
+export async function api_GetFinalInvoices(query = "") {
     const token = localStorage.getItem('access_token');
-    return await fetch('/api/invoices/', {
+    return await fetch(`/api/accountant/invoices/${query}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+    });
+}
+
+export async function api_CreateFinalInvoice(data) {
+    const token = localStorage.getItem('access_token');
+    return await fetch('/api/accountant/invoices/', {
         method: 'POST',
         headers: { 
             'Authorization': `Bearer ${token}`,
@@ -194,63 +195,24 @@ export async function api_CreateInvoice(data) {
     });
 }
 
-export async function api_GetInvoice(id) {
+export async function api_ExportFinalInvoiceExcel(id) {
     const token = localStorage.getItem('access_token');
-    return await fetch(`/api/invoices/${id}/`, {
+    return await fetch(`/api/accountant/invoices/${id}/export_excel/`, {
         headers: { 'Authorization': `Bearer ${token}` }
     });
 }
 
-export async function api_UpdateInvoice(id, data) {
+export async function api_ExportFinalInvoicePDF(id) {
     const token = localStorage.getItem('access_token');
-    return await fetch(`/api/invoices/${id}/`, {
-        method: 'PUT',
-        headers: { 
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(data)
-    });
-}
-
-export async function api_PartialUpdateInvoice(id, data) {
-    const token = localStorage.getItem('access_token');
-    return await fetch(`/api/invoices/${id}/`, {
-        method: 'PATCH',
-        headers: { 
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(data)
-    });
-}
-
-export async function api_DeleteInvoice(id) {
-    const token = localStorage.getItem('access_token');
-    return await fetch(`/api/invoices/${id}/`, {
-        method: 'DELETE',
+    return await fetch(`/api/accountant/invoices/${id}/export_pdf/`, {
         headers: { 'Authorization': `Bearer ${token}` }
     });
 }
 
-export async function api_ExportInvoicesExcel() {
+// ==================== ORDERS ====================
+export async function api_GetOrders(query = "") {
     const token = localStorage.getItem('access_token');
-    return await fetch('/api/invoices/export-excel/', {
-        headers: { 'Authorization': `Bearer ${token}` }
-    });
-}
-
-export async function api_ExportInvoicesPDF() {
-    const token = localStorage.getItem('access_token');
-    return await fetch('/api/invoices/export-pdf/', {
-        headers: { 'Authorization': `Bearer ${token}` }
-    });
-}
-
-
-export async function api_GetOrders() {
-    const token = localStorage.getItem('access_token');
-    return await fetch('/api/orders/', {
+    return await fetch(`/api/orders/${query}`, {
         headers: { 'Authorization': `Bearer ${token}` }
     });
 }
@@ -306,12 +268,50 @@ export async function api_DeleteOrder(id) {
     });
 }
 
-export async function api_ExportOrders() {
+export async function api_ExportOrders(query = "") {
     const token = localStorage.getItem('access_token');
-    return await fetch('/api/orders/export/', {
+    return await fetch(`/api/orders/export_excel/${query}`, {
         headers: { 'Authorization': `Bearer ${token}` }
     });
 }
+// ==================== DRIVERS ====================
+
+export async function api_GetDriverOrders() {
+    const token = localStorage.getItem('access_token');
+    return await fetch('/api/driver/orders/', {
+        headers: { 'Authorization': `Bearer ${token}` }
+    });
+}
+
+export async function api_GetDriverOrder(id) {
+    const token = localStorage.getItem('access_token');
+    return await fetch(`/api/driver/orders/${id}/`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+    });
+}
+
+export async function api_ConfirmDriverOrder(orderId, file, quantity) {
+    const token = localStorage.getItem('access_token');
+    const formData = new FormData();
+    formData.append('proof_image', file);
+    formData.append("quantity", quantity);
+
+    return await fetch(`/api/driver/orders/${orderId}/confirm/`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` },
+        body: formData
+    });
+}
+
+export async function api_ReportDriverProblem(orderId, reason) {
+    const token = localStorage.getItem('access_token');
+    return await fetch(`/api/driver/orders/${orderId}/problem/`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason })
+    });
+}
+
 
 // ===========================================
 // SAMPLE DATA FOR DEVELOPMENT/DEMO

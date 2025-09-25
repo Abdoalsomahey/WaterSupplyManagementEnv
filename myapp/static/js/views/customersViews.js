@@ -27,18 +27,17 @@ export function render_Customers() {
                         </div>
                     </div>
                     <div class="col-md-2">
-                        <select class="form-select" id="status-filter">
-                            <option value="">All Status</option>
-                            <option value="active">Active</option>
-                            <option value="inactive">Inactive</option>
+                        <select class="form-select" id="area-filter">
+                            <option value="">All Areas</option>
+                            <option value="Area 1">Area 1</option>
+                            <option value="Area 2">Area 2</option>
+                            <option value="Area 3">Area 3</option>
                         </select>
                     </div>
                     <div class="col-md-2">
-                        <select class="form-select" id="orders-filter">
-                            <option value="">All Orders</option>
-                            <option value="high">High Volume</option>
-                            <option value="medium">Medium Volume</option>
-                            <option value="low">Low Volume</option>
+                        <select class="form-select" id="driver-filter">
+                            <option value="">All Drivers</option>
+                            <!-- Drivers will be populated dynamically -->
                         </select>
                     </div>
                     <div class="col-md-2">
@@ -72,33 +71,35 @@ export function render_Customers() {
                             <button class="btn btn-sm btn-outline-success" id="bulk-export">
                                 <i class="bi bi-download me-1"></i>Export Selected
                             </button>
-                            <button class="btn btn-sm btn-outline-warning" id="bulk-email">
-                                <i class="bi bi-envelope me-1"></i>Send Email
-                            </button>
                         </div>
                     </div>
                 </div>
                 <div class="card-body p-0">
-                    <div class="table-container">
+                    <!-- ✅ Responsive table wrapper -->
+                    <div class="table-responsive">
                         <table class="table table-hover mb-0">
                             <thead>
                                 <tr>
                                     <th width="50">
                                         <input type="checkbox" class="form-check-input" id="select-all-checkbox">
                                     </th>
-                                    <th>Customer</th>
-                                    <th>Contact Person</th>
-                                    <th>Contact Info</th>
-                                    <th>Orders</th>
-                                    <th>Total Spent</th>
-                                    <th>Status</th>
-                                    <th>Last Order</th>
+                                    <th>Full Name</th>
+                                    <th>Driver</th>
+                                    <th>Area</th>
+                                    <th>Zone</th>
+                                    <th>Plot</th>
+                                    <th>Property Type</th>
+                                    <th>Account No.</th>
+                                    <th>Phone</th>
+                                    <th>Starting Date</th>
+                                    <th>Weekly Trips</th>
+                                    <th>Gallons</th>
                                     <th width="120">Actions</th>
                                 </tr>
                             </thead>
                             <tbody id="customers-table">
                                 <tr>
-                                    <td colspan="9" class="text-center text-muted py-4">
+                                    <td colspan="12" class="text-center text-muted py-4">
                                         <div class="spinner-border spinner-border-sm me-2"></div>
                                         Loading customers...
                                     </td>
